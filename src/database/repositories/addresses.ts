@@ -14,7 +14,10 @@ export const addressRepository = {
   async save(db: SQLiteDatabase, address: AddressRecord): Promise<void> {
     await db.withTransactionAsync(async () => {
       if (address.is_default) {
-        await db.runAsync('UPDATE Addresses SET is_default=0 WHERE user_id=?', address.user_id);
+        await db.runAsync(
+          `UPDATE Addresses SET is_default=0,sync_status='pending'
+           WHERE user_id=? AND is_default=1`, address.user_id,
+        );
       }
       await db.runAsync(
         `INSERT INTO Addresses(id,user_id,recipient_name,phone_number,province,city,district,
@@ -28,5 +31,24 @@ export const addressRepository = {
         address.full_address, address.is_default,
       );
     });
+  },
+  async setDefault(db: SQLiteDatabase, firebaseUid: string, addressId: string): Promise<void> {
+    await db.withTransactionAsync(async () => {
+      const address = await db.getFirstAsync(
+        'SELECT id FROM Addresses WHERE id=? AND user_id=?', addressId, firebaseUid,
+      );
+      if (!address) throw new Error('Address does not belong to this user.');
+      await db.runAsync(
+        `UPDATE Addresses SET is_default=0,sync_status='pending'
+         WHERE user_id=? AND is_default=1`, firebaseUid,
+      );
+      await db.runAsync(
+        `UPDATE Addresses SET is_default=1,sync_status='pending'
+         WHERE id=? AND user_id=?`, addressId, firebaseUid,
+      );
+    });
+  },
+  async remove(db: SQLiteDatabase, firebaseUid: string, addressId: string): Promise<void> {
+    await db.runAsync('DELETE FROM Addresses WHERE id=? AND user_id=?', addressId, firebaseUid);
   },
 };
