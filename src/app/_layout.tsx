@@ -1,10 +1,12 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
+import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import { useColorScheme } from 'react-native';
+import '@/global.css';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
+import { DemoStoreProvider } from '@/contexts/demo-store';
+import { AuthProvider } from '@/contexts/auth-context';
 import { initializeDatabase } from '@/database';
 
 SplashScreen.preventAutoHideAsync();
@@ -17,9 +19,24 @@ export default function TabLayout() {
     });
   }, []);
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <AnimatedSplashOverlay />
-      <AppTabs />
-    </ThemeProvider>
+    <AuthProvider>
+      <DemoStoreProvider>
+        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+          <AnimatedSplashOverlay />
+          <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#EDDEFF' } }}>
+            <Stack.Screen name="index" />
+            <Stack.Screen name="explore" />
+            <Stack.Screen name="favorites" />
+            <Stack.Screen name="cart" />
+            <Stack.Screen name="profile" />
+            <Stack.Screen name="login" />
+            <Stack.Screen name="register" />
+            <Stack.Screen name="admin" />
+            <Stack.Screen name="addresses" />
+            <Stack.Screen name="product/[id]" options={{ animation: 'slide_from_right' }} />
+          </Stack>
+        </ThemeProvider>
+      </DemoStoreProvider>
+    </AuthProvider>
   );
 }
