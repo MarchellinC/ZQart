@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { CustomInput } from '@/components/custom-input';
@@ -6,6 +6,7 @@ import { PrimaryButton } from '@/components/primary-button';
 import { Palette } from '@/constants/colors';
 import { Radius, Spacing } from '@/constants/theme';
 import { getAuthErrorMessage, register, signIn } from '@/services/firebase/auth';
+import { useAuth } from '@/contexts/auth-context';
 
 type Props = { mode: 'login' | 'register' };
 
@@ -16,6 +17,13 @@ export function AuthScreen({ mode }: Props) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [redirectAfterLogin, setRedirectAfterLogin] = useState(false);
+  const { user, role, ready } = useAuth();
+
+  useEffect(() => {
+    if (!redirectAfterLogin || !ready || !user) return;
+    router.replace(role === 'admin' ? '/admin' : '/');
+  }, [ready, redirectAfterLogin, role, user]);
   async function submit() {
     setError('');
     if (!email.trim() || !password || (isRegister && !name.trim())) {
@@ -30,7 +38,7 @@ export function AuthScreen({ mode }: Props) {
     try {
       if (isRegister) await register(email, password, name);
       else await signIn(email, password);
-      router.replace('/');
+      setRedirectAfterLogin(true);
     } catch (cause) {
       setError(getAuthErrorMessage(cause));
     } finally {

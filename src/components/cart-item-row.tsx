@@ -23,7 +23,7 @@ export function CartItemRow({ product, quantity, onQuantityChange, onRemove }: P
           </Pressable>
         </View>
         <ThemedText style={styles.price}>{formatRupiah(product.price)}</ThemedText>
-        <QuantitySelector value={quantity} onChange={onQuantityChange} />
+        <QuantitySelector value={quantity} max={product.stock} onChange={onQuantityChange} />
       </View>
     </View>
   );

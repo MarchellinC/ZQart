@@ -10,8 +10,10 @@ import { Palette } from '@/constants/colors';
 import { Radius, Spacing } from '@/constants/theme';
 import { useDemoStore } from '@/contexts/demo-store';
 import { formatRupiah } from '@/utils/currency';
+import { useAuth } from '@/contexts/auth-context';
 
 export default function CartScreen() {
+  const { user, role } = useAuth();
   const { cartItems, products, setQuantity, removeFromCart } = useDemoStore();
   const rows = cartItems.flatMap((item) => {
     const product = products.find((entry) => entry.id === item.productId);
@@ -23,18 +25,22 @@ export default function CartScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <AppHeader greeting="Rangkuman" title="Keranjang" />
         <SectionHeading title="Belanjaanmu" subtitle={`${rows.length} produk pilihan`} />
-        {rows.length ? <>
+        {!user || role !== 'buyer' ? <View style={styles.summary}>
+          <Text style={styles.notice}>Masuk sebagai buyer untuk menggunakan keranjangmu.</Text>
+          <PrimaryButton title="Masuk" onPress={() => router.push('/login')} />
+        </View> : rows.length ? <>
           {rows.map((item) => <CartItemRow key={item.productId} product={item.product}
             quantity={item.quantity} onQuantityChange={(quantity) => setQuantity(item.productId, quantity)}
             onRemove={() => removeFromCart(item.productId)} />)}
           <View style={styles.summary}>
             <Text style={styles.summaryTitle}>Ringkasan belanja</Text>
-            <View style={styles.totalRow}><Text style={styles.totalLabel}>Subtotal demo</Text>
+            <View style={styles.totalRow}><Text style={styles.totalLabel}>Subtotal</Text>
               <Text style={styles.total}>{formatRupiah(total)}</Text></View>
-            <Text style={styles.notice}>Checkout simulasi tersedia pada tahap berikutnya.</Text>
+            <Text style={styles.notice}>Total ini merupakan estimasi belanja.</Text>
+            <PrimaryButton title="Lanjut ke checkout simulasi" onPress={() => router.push('/checkout')} />
             <PrimaryButton title="Lanjut belanja" onPress={() => router.replace('/')} />
           </View>
-        </> : <EmptyState title="Keranjang masih kosong" description="Temukan karya lokal yang kamu sukai." 
+        </> : <EmptyState title="Keranjang masih kosong" description="Temukan karya lokal yang kamu sukai."
           actionLabel="Jelajahi produk" onAction={() => router.replace('/')} />}
       </ScrollView>
     </BuyerPage>

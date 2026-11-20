@@ -6,8 +6,10 @@ import { initializeDatabase, addressRepository } from '@/database';
 import type { AddressRecord } from '@/database/repositories/addresses';
 import { Palette } from '@/constants/colors';
 import { Radius, Spacing } from '@/constants/theme';
+import { addressFieldsSchema } from '@/utils/validation';
+import { useDemoStore } from '@/contexts/demo-store';
 
-type Fields = Omit<AddressRecord, 'id' | 'user_id' | 'is_default'>;
+type Fields = Omit<AddressRecord, 'id' | 'user_id' | 'is_default' | 'updated_at'>;
 const empty: Fields = { recipient_name: '', phone_number: '', province: '', city: '', district: '', postal_code: '', full_address: '' };
 const labels: [keyof Fields, string][] = [
   ['recipient_name', 'Nama penerima'], ['phone_number', 'Nomor telepon'], ['province', 'Provinsi'],
@@ -16,30 +18,42 @@ const labels: [keyof Fields, string][] = [
 
 export default function AddressesScreen() {
   const { user, role } = useAuth();
+  const { syncNow } = useDemoStore();
   const [items, setItems] = useState<AddressRecord[]>([]);
   const [form, setForm] = useState<Fields>(empty);
   const [selected, setSelected] = useState<string | null>(null);
   const [isDefault, setIsDefault] = useState(false);
+  const uid = user?.uid;
   const reload = useCallback(async () => {
-    if (!user) return;
+    if (!uid) return;
     const db = await initializeDatabase();
-    setItems(await addressRepository.listForUser(db, user.uid));
-  }, [user?.uid]);
-  useEffect(() => { void reload().catch((error) => Alert.alert('Alamat gagal dimuat', String(error))); }, [reload]);
+    setItems(await addressRepository.listForUser(db, uid));
+  }, [uid]);
+  useEffect(() => {
+    let active = true;
+    if (uid) void (async () => {
+      const db = await initializeDatabase();
+      const rows = await addressRepository.listForUser(db, uid);
+      if (active) setItems(rows);
+    })().catch((error) => Alert.alert('Alamat gagal dimuat', String(error)));
+    return () => { active = false; };
+  }, [uid]);
   if (!user || role !== 'buyer') return <View style={styles.center}><Text style={styles.title}>Masuk sebagai buyer untuk mengelola alamat.</Text><Pressable onPress={() => router.replace('/login')}><Text style={styles.link}>Masuk</Text></Pressable></View>;
-  const uid = user.uid;
+  const buyerUid = user.uid;
   const update = (key: keyof Fields, value: string) => setForm((current) => ({ ...current, [key]: value }));
   const reset = () => { setForm(empty); setSelected(null); setIsDefault(false); };
   async function save() {
-    if (Object.values(form).some((value) => !value.trim())) { Alert.alert('Form belum lengkap', 'Isi semua bagian alamat.'); return; }
+    const validation = addressFieldsSchema.safeParse(form);
+    if (!validation.success) { Alert.alert('Form belum lengkap', validation.error.issues[0]?.message ?? 'Periksa kembali alamat.'); return; }
     try {
       const db = await initializeDatabase();
-      await addressRepository.save(db, { ...form, id: selected ?? `address-${Date.now()}`, user_id: uid, is_default: isDefault || items.length === 0 ? 1 : 0 });
-      await reload(); reset();
+      await addressRepository.save(db, { ...validation.data, id: selected ?? `address-${Date.now()}`,
+        user_id: buyerUid, is_default: isDefault || items.length === 0 ? 1 : 0, updated_at: new Date().toISOString() });
+      await reload(); reset(); void syncNow();
     } catch (error) { Alert.alert('Alamat gagal disimpan', error instanceof Error ? error.message : String(error)); }
   }
   async function remove(id: string) {
-    const db = await initializeDatabase(); await addressRepository.remove(db, uid, id); await reload();
+    const db = await initializeDatabase(); await addressRepository.remove(db, buyerUid, id); await reload(); void syncNow();
   }
   return <ScrollView contentContainerStyle={styles.content}>
     <Text style={styles.title}>Alamat pengiriman</Text>
@@ -56,7 +70,7 @@ export default function AddressesScreen() {
       <Text style={styles.detail}>{item.phone_number} · {item.full_address}, {item.district}, {item.city}, {item.province} {item.postal_code}</Text>
       <View style={styles.actions}>
         <Pressable onPress={() => { setSelected(item.id); setForm({ ...item }); setIsDefault(Boolean(item.is_default)); }}><Text style={styles.link}>Ubah</Text></Pressable>
-        {!item.is_default ? <Pressable onPress={() => { void (async () => { const db = await initializeDatabase(); await addressRepository.setDefault(db, uid, item.id); await reload(); })().catch((error) => Alert.alert('Gagal mengubah alamat utama', String(error))); }}><Text style={styles.link}>Jadikan utama</Text></Pressable> : null}
+        {!item.is_default ? <Pressable onPress={() => { void (async () => { const db = await initializeDatabase(); await addressRepository.setDefault(db, buyerUid, item.id); await reload(); void syncNow(); })().catch((error) => Alert.alert('Gagal mengubah alamat utama', String(error))); }}><Text style={styles.link}>Jadikan utama</Text></Pressable> : null}
         <Pressable onPress={() => Alert.alert('Hapus alamat?', item.recipient_name, [{ text: 'Batal' }, { text: 'Hapus', style: 'destructive', onPress: () => { void remove(item.id).catch((error) => Alert.alert('Gagal', String(error))); } }])}><Text style={styles.delete}>Hapus</Text></Pressable>
       </View>
     </View>)}

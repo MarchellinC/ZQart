@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SymbolView } from 'expo-symbols';
+import { Image } from 'expo-image';
 import type { Product } from '@/types/product';
 import { Palette } from '@/constants/colors';
 import { Radius, Spacing } from '@/constants/theme';
@@ -12,7 +13,8 @@ export function ProductCard({ product, onPress, onFavoritePress, favorite = fals
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
       <View style={[styles.art, { backgroundColor: product.artColor }]}>
-        <Text style={styles.emoji}>{product.emoji}</Text>
+        {product.image_url ? <Image source={product.image_url} style={styles.productImage}
+          contentFit="cover" cachePolicy="disk" transition={160} /> : <Text style={styles.emoji}>{product.emoji}</Text>}
         {product.badge ? <Text style={styles.badge}>{product.badge}</Text> : null}
         <Pressable accessibilityLabel={favorite ? 'Hapus dari favorit' : 'Tambah ke favorit'}
           onPress={(event) => { event.stopPropagation(); onFavoritePress?.(); }} style={styles.favorite}>
@@ -42,6 +44,7 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(232,229,235,0.8)',
   },
   art: { height: 142, alignItems: 'center', justifyContent: 'center' },
+  productImage: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
   emoji: { fontSize: 58 },
   badge: {
     position: 'absolute', left: Spacing.two, top: Spacing.two, color: Palette.primaryDark,

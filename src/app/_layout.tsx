@@ -1,7 +1,7 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
-import { useColorScheme } from 'react-native';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import '@/global.css';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
@@ -33,6 +33,11 @@ export default function TabLayout() {
             <Stack.Screen name="register" />
             <Stack.Screen name="admin" />
             <Stack.Screen name="addresses" />
+            <Stack.Screen name="checkout" />
+            <Stack.Screen name="info" />
+            <Stack.Screen name="store-address" />
+            <Stack.Screen name="categories" />
+            <Stack.Screen name="sync-status" />
             <Stack.Screen name="product/[id]" options={{ animation: 'slide_from_right' }} />
           </Stack>
         </ThemeProvider>
