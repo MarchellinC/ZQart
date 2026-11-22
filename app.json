@@ -28,9 +28,17 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "backgroundColor": "#EDDEFF",
+          "image": "./assets/images/zqart-logo.png",
+          "imageWidth": 90
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Izinkan ZQART memilih foto produk dari perangkat.",
+          "cameraPermission": false,
+          "microphonePermission": false
         }
       ],
       "expo-sqlite",

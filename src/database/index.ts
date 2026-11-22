@@ -23,3 +23,6 @@ export { productRepository } from './repositories/products';
 export { userRepository } from './repositories/users';
 export { buyerDataRepository } from './repositories/buyer-data';
 export { addressRepository } from './repositories/addresses';
+export { categoryRepository } from './repositories/categories';
+export { storeAddressRepository } from './repositories/store-address';
+export { orderRepository } from './repositories/orders';

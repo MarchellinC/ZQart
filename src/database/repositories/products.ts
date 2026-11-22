@@ -1,4 +1,5 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
+import { queueSyncOperation } from '../sync-queue';
 
 export interface ProductRecord {
   id: string; name: string; description: string; price: number; image_url: string | null;
@@ -18,6 +19,11 @@ export const productRepository = {
   async findById(db: SQLiteDatabase, id: string): Promise<ProductRecord | null> {
     return db.getFirstAsync<ProductRecord>('SELECT * FROM Products WHERE id = ?', id);
   },
+  async listByCategory(db: SQLiteDatabase, categoryId: string): Promise<ProductRecord[]> {
+    return db.getAllAsync<ProductRecord>(
+      'SELECT * FROM Products WHERE category_id=? ORDER BY name COLLATE NOCASE', categoryId,
+    );
+  },
   async save(db: SQLiteDatabase, product: ProductRecord): Promise<void> {
     await db.runAsync(
       `INSERT INTO Products(id,name,description,price,image_url,category_id,stock,updated_at,sync_status)
@@ -28,5 +34,13 @@ export const productRepository = {
       product.id, product.name, product.description, product.price, product.image_url,
       product.category_id, product.stock, product.updated_at, product.sync_status,
     );
+  },
+  async remove(db: SQLiteDatabase, id: string): Promise<void> {
+    await db.withTransactionAsync(async () => {
+      await queueSyncOperation(db, {
+        collection: 'products', document_id: id, owner_uid: '', operation: 'delete', payload: null,
+      });
+      await db.runAsync('DELETE FROM Products WHERE id=?', id);
+    });
   },
 };

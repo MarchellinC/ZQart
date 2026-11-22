@@ -41,6 +41,25 @@ This command will move the starter code to the **example** directory and create 
 - If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
 - Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
 
+## Menetapkan akun admin
+
+Role admin tidak didapat dari alamat email atau nama akun. Setelah akun masuk sekali, ambil UID akun tersebut dari **Firebase Console → Authentication → Users**. Di **Firestore Database → `users`**, buka/buat dokumen dengan ID yang sama dengan UID, lalu isi sekurangnya:
+
+```text
+id: <UID akun>
+name: <nama admin>
+email: <email akun>
+role: admin
+created_at: <waktu ISO, misalnya 2026-11-20T00:00:00.000Z>
+updated_at: <waktu ISO>
+```
+
+Deploy ulang `firestore.rules` setelah perubahan rules. Tutup sesi aplikasi lalu masuk kembali agar role dimuat dari Firestore. Pengguna tidak dapat mengubah role sendiri melalui aplikasi; role hanya boleh ditetapkan lewat Firebase Console atau akun admin yang telah berwenang. Jika `users/{uid}` berisi `role: buyer`, UI akan tetap menampilkan Buyer.
+
+## Upload foto produk
+
+Salin `.env.example` menjadi `.env`, lalu isi `EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME` dengan cloud name dari Cloudinary Dashboard dan `EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET` dengan nama **unsigned upload preset**. Buat preset tersebut di **Settings → Upload → Upload presets** dan atur folder `zqart/products` bila diinginkan. Jangan masukkan API secret ke aplikasi. Setelah mengubah `.env`, mulai ulang Expo dengan membersihkan cache (`npx expo start -c`). Pada form admin, pilih foto dari perangkat; foto diunggah saat produk disimpan. URL gambar juga dapat ditempel manual sebagai alternatif.
+
 ## Learn more
 
 To learn more about developing your project with Expo, look at the following resources:
