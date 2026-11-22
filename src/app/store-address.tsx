@@ -8,6 +8,7 @@ import type { StoreAddressRecord } from '@/database/repositories/store-address';
 import { Palette } from '@/constants/colors';
 import { Radius, Spacing } from '@/constants/theme';
 import { addressFieldsSchema } from '@/utils/validation';
+import { useDemoStore } from '@/contexts/demo-store';
 
 type Fields = Omit<StoreAddressRecord, 'updated_at' | 'sync_status'>;
 const empty: Fields = {
@@ -22,7 +23,10 @@ const labels: [keyof Fields, string][] = [
 
 export default function StoreAddressScreen() {
   const { role, ready } = useAuth();
+  const { syncNow } = useDemoStore();
   const [form, setForm] = useState<Fields>(empty);
+  const [savedForm, setSavedForm] = useState<Fields | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     let active = true;
@@ -32,6 +36,7 @@ export default function StoreAddressScreen() {
       if (!active || !address) return;
       const { updated_at: _updatedAt, sync_status: _syncStatus, ...fields } = address;
       setForm(fields);
+      setSavedForm(fields);
     })().catch((error) => Alert.alert('Alamat toko gagal dimuat', String(error)));
     return () => { active = false; };
   }, [role]);
@@ -43,11 +48,19 @@ export default function StoreAddressScreen() {
     </View>;
   }
 
-  const update = (key: keyof Fields, value: string) => setForm((current) => ({ ...current, [key]: value }));
+  const update = (key: keyof Fields, value: string) => {
+    setForm((current) => ({ ...current, [key]: value }));
+    setErrors((current) => ({ ...current, [key]: '' }));
+  };
   async function save() {
     const validation = addressFieldsSchema.safeParse(form);
     if (!validation.success) {
-      Alert.alert('Form belum lengkap', validation.error.issues[0]?.message);
+      setErrors(Object.fromEntries(validation.error.issues.map((issue) => [String(issue.path[0]), issue.message])));
+      return;
+    }
+    setErrors({});
+    if (savedForm && labels.every(([key]) => savedForm[key].trim() === validation.data[key].trim())) {
+      Alert.alert('Tidak ada perubahan', 'Data alamat toko masih sama seperti sebelumnya.');
       return;
     }
     setBusy(true);
@@ -56,7 +69,10 @@ export default function StoreAddressScreen() {
       await storeAddressRepository.save(db, {
         ...validation.data, updated_at: new Date().toISOString(), sync_status: 'pending',
       });
-      Alert.alert('Alamat toko tersimpan', 'Alamat ini digunakan sebagai asal pada checkout simulasi.');
+      setSavedForm(validation.data);
+      void syncNow();
+      Alert.alert(savedForm ? 'Alamat toko berhasil diubah' : 'Alamat toko berhasil ditambahkan',
+        'Alamat ini digunakan sebagai alamat asal saat checkout.');
     } catch (error) {
       Alert.alert('Alamat toko gagal disimpan', error instanceof Error ? error.message : String(error));
     } finally {
@@ -69,7 +85,8 @@ export default function StoreAddressScreen() {
       {labels.map(([key, label]) => <View key={key} style={styles.field}>
         <Text style={styles.label}>{label}</Text>
         <TextInput value={form[key]} onChangeText={(value) => update(key, value)}
-          style={[styles.input, key === 'full_address' && styles.multiline]} multiline={key === 'full_address'} />
+          style={[styles.input, key === 'full_address' && styles.multiline, errors[key] && styles.invalid]} multiline={key === 'full_address'} />
+        {errors[key] ? <Text style={styles.errorText}>{errors[key]}</Text> : null}
       </View>)}
       <Pressable style={[styles.primary, busy && styles.disabled]} disabled={busy} onPress={() => { void save(); }}>
         <Text style={styles.primaryText}>{busy ? 'Menyimpan…' : 'Simpan alamat toko'}</Text>
@@ -85,6 +102,7 @@ const styles = StyleSheet.create({
   form: { padding: Spacing.three, gap: Spacing.two, borderRadius: Radius.medium, backgroundColor: Palette.white },
   field: { gap: 4 }, label: { color: Palette.secondaryText, fontSize: 11, fontWeight: '700' },
   input: { minHeight: 42, borderWidth: 1, borderColor: Palette.border, borderRadius: 12, paddingHorizontal: 10, color: Palette.text },
+  invalid: { borderColor: Palette.error, borderWidth: 1.5 }, errorText: { color: Palette.error, fontSize: 11 },
   multiline: { minHeight: 88, paddingVertical: 10, textAlignVertical: 'top' },
   primary: { minHeight: 46, borderRadius: Radius.pill, backgroundColor: Palette.primaryDark, alignItems: 'center', justifyContent: 'center' },
   disabled: { opacity: 0.55 }, primaryText: { color: Palette.white, fontWeight: '700' },

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SymbolView } from 'expo-symbols';
 import { Image } from 'expo-image';
@@ -6,18 +7,25 @@ import { Palette } from '@/constants/colors';
 import { Radius, Spacing } from '@/constants/theme';
 import { formatRupiah } from '@/utils/currency';
 import { ThemedText } from './themed-text';
+import { useDemoStore } from '@/contexts/demo-store';
+import { ConfirmDialog } from './confirm-dialog';
 
 type Props = { product: Product; onPress?: () => void; onFavoritePress?: () => void; favorite?: boolean };
 
 export function ProductCard({ product, onPress, onFavoritePress, favorite = false }: Props) {
+  const { cartItems } = useDemoStore();
+  const [confirmUnfavorite, setConfirmUnfavorite] = useState(false);
+  const cartQuantity = cartItems.find((item) => item.productId === product.id)?.quantity ?? 0;
   return (
+    <>
     <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
       <View style={[styles.art, { backgroundColor: product.artColor }]}>
         {product.image_url ? <Image source={product.image_url} style={styles.productImage}
           contentFit="cover" cachePolicy="disk" transition={160} /> : <Text style={styles.emoji}>{product.emoji}</Text>}
         {product.badge ? <Text style={styles.badge}>{product.badge}</Text> : null}
+        {cartQuantity > 0 ? <View style={styles.cartCount}><Text style={styles.cartCountText}>Keranjang +{cartQuantity}</Text></View> : null}
         <Pressable accessibilityLabel={favorite ? 'Hapus dari favorit' : 'Tambah ke favorit'}
-          onPress={(event) => { event.stopPropagation(); onFavoritePress?.(); }} style={styles.favorite}>
+          onPress={(event) => { event.stopPropagation(); if (favorite) setConfirmUnfavorite(true); else onFavoritePress?.(); }} style={styles.favorite}>
           <SymbolView name={{ ios: favorite ? 'heart.fill' : 'heart', android: 'favorite', web: 'favorite' }}
             size={16} tintColor={favorite ? Palette.error : Palette.primaryDark} />
         </Pressable>
@@ -34,6 +42,11 @@ export function ProductCard({ product, onPress, onFavoritePress, favorite = fals
         </View>
       </View>
     </Pressable>
+    <ConfirmDialog visible={confirmUnfavorite} title="Hapus dari favorit?"
+      message={`Yakin ingin menghapus ${product.name} dari daftar favorit?`}
+      confirmLabel="Ya, hapus" onCancel={() => setConfirmUnfavorite(false)}
+      onConfirm={() => { setConfirmUnfavorite(false); onFavoritePress?.(); }} />
+    </>
   );
 }
 
@@ -51,6 +64,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.9)', borderRadius: Radius.pill,
     paddingHorizontal: 9, paddingVertical: 5, fontSize: 9, fontWeight: '700',
   },
+  cartCount: { position: 'absolute', left: Spacing.two, bottom: Spacing.two, paddingHorizontal: 9, paddingVertical: 5,
+    borderRadius: Radius.pill, backgroundColor: Palette.primaryDark },
+  cartCountText: { color: Palette.white, fontSize: 10, fontWeight: '800' },
   favorite: {
     position: 'absolute', right: Spacing.two, top: Spacing.two, width: 30, height: 30,
     borderRadius: Radius.pill, backgroundColor: Palette.white, alignItems: 'center', justifyContent: 'center',

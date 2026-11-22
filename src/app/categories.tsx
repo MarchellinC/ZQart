@@ -9,14 +9,17 @@ import type { CategoryRecord } from '@/database/repositories/categories';
 import { Palette } from '@/constants/colors';
 import { Radius, Spacing } from '@/constants/theme';
 import { categoryFormSchema } from '@/utils/validation';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 
 export default function CategoriesScreen() {
   const { role, ready } = useAuth();
-  const { refreshProducts } = useDemoStore();
+  const { refreshProducts, syncNow } = useDemoStore();
   const [categories, setCategories] = useState<CategoryRecord[]>([]);
   const [name, setName] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [nameError, setNameError] = useState('');
+  const [pendingDelete, setPendingDelete] = useState<CategoryRecord | null>(null);
   const reload = useCallback(async () => {
     const db = await initializeDatabase();
     setCategories(await categoryRepository.list(db));
@@ -37,11 +40,16 @@ export default function CategoriesScreen() {
     <Pressable onPress={() => router.replace('/')}><Text style={styles.link}>Kembali ke katalog</Text></Pressable>
   </View>;
 
-  const reset = () => { setSelected(null); setName(''); };
+  const reset = () => { setSelected(null); setName(''); setNameError(''); };
   async function save() {
     const validation = categoryFormSchema.safeParse({ name });
-    if (!validation.success) { Alert.alert('Nama kategori diperlukan', validation.error.issues[0]?.message); return; }
+    if (!validation.success) { setNameError(validation.error.issues[0]?.message ?? 'Nama kategori wajib diisi.'); return; }
     const clean = validation.data.name;
+    const existing = categories.find((item) => item.id === selected);
+    if (existing?.name.trim() === clean) {
+      Alert.alert('Tidak ada perubahan', 'Nama kategori masih sama seperti sebelumnya.');
+      return;
+    }
     if (categories.some((item) => item.name.toLocaleLowerCase() === clean.toLocaleLowerCase() && item.id !== selected)) {
       Alert.alert('Kategori sudah ada', 'Gunakan nama kategori lain.');
       return;
@@ -56,6 +64,9 @@ export default function CategoriesScreen() {
         updated_at: new Date().toISOString(), sync_status: 'pending',
       });
       await Promise.all([reload(), refreshProducts()]);
+      void syncNow();
+      Alert.alert(selected ? 'Kategori berhasil diubah' : 'Kategori berhasil ditambahkan', selected
+        ? 'Perubahan kategori sudah disimpan.' : 'Kategori baru sudah disimpan.');
       reset();
     } catch (error) {
       Alert.alert('Kategori gagal disimpan', error instanceof Error ? error.message : String(error));
@@ -67,15 +78,17 @@ export default function CategoriesScreen() {
       const db = await initializeDatabase();
       await categoryRepository.remove(db, item.id);
       await Promise.all([reload(), refreshProducts()]);
+      void syncNow();
     } catch (error) {
       Alert.alert('Kategori gagal dihapus', error instanceof Error ? error.message : String(error));
     }
   }
 
-  return <AdminLayout title="Kelola kategori" subtitle="Atur pengelompokan produk toko." active="categories">
+  return <AdminLayout title="Kelola kategori" subtitle="Atur pengelompokan produk toko." active="categories" scrollToTopToken={selected}>
     <View style={styles.form}>
       <Text style={styles.heading}>{selected ? 'Ubah kategori' : 'Kategori baru'}</Text>
-      <TextInput value={name} onChangeText={setName} placeholder="Contoh: Dekorasi" style={styles.input} />
+      <TextInput value={name} onChangeText={(value) => { setName(value); setNameError(''); }} placeholder="Contoh: Dekorasi" style={[styles.input, nameError && styles.invalid]} />
+      {nameError ? <Text style={styles.errorText}>{nameError}</Text> : null}
       <Pressable style={[styles.primary, busy && styles.disabled]} disabled={busy} onPress={() => { void save(); }}>
         <Text style={styles.primaryText}>{busy ? 'Menyimpan…' : selected ? 'Simpan perubahan' : 'Tambah kategori'}</Text>
       </Pressable>
@@ -88,10 +101,12 @@ export default function CategoriesScreen() {
         <Text style={styles.status}>{item.sync_status === 'synced' ? 'Tersinkron' : 'Menunggu sinkronisasi'}</Text>
       </View>
       <Pressable onPress={() => { setSelected(item.id); setName(item.name); }}><Text style={styles.link}>Ubah</Text></Pressable>
-      <Pressable onPress={() => Alert.alert('Hapus kategori?', `${item.name}. Produk dalam kategori ini akan menjadi tanpa kategori.`, [
-        { text: 'Batal' }, { text: 'Hapus', style: 'destructive', onPress: () => { void remove(item); } },
-      ])}><Text style={styles.delete}>Hapus</Text></Pressable>
+      <Pressable onPress={() => setPendingDelete(item)}><Text style={styles.delete}>Hapus</Text></Pressable>
     </View>)}
+    <ConfirmDialog visible={pendingDelete !== null} title="Hapus kategori?"
+      message={pendingDelete ? `${pendingDelete.name} akan dihapus. Produk pada kategori ini tidak lagi memiliki kategori.` : ''}
+      confirmLabel="Ya, hapus kategori" onCancel={() => setPendingDelete(null)}
+      onConfirm={() => { const item = pendingDelete; setPendingDelete(null); if (item) void remove(item); }} />
   </AdminLayout>;
 }
 
@@ -101,6 +116,7 @@ const styles = StyleSheet.create({
   form: { padding: Spacing.three, gap: Spacing.two, borderRadius: Radius.medium, backgroundColor: Palette.white },
   heading: { color: Palette.text, fontSize: 16, fontWeight: '800' },
   input: { minHeight: 44, borderRadius: 12, borderWidth: 1, borderColor: Palette.border, paddingHorizontal: 12, color: Palette.text },
+  invalid: { borderColor: Palette.error, borderWidth: 1.5 }, errorText: { color: Palette.error, fontSize: 11 },
   primary: { minHeight: 46, borderRadius: Radius.pill, backgroundColor: Palette.primaryDark, alignItems: 'center', justifyContent: 'center' },
   disabled: { opacity: 0.55 }, primaryText: { color: Palette.white, fontWeight: '700' },
   sectionLabel: { color: Palette.secondaryText, fontSize: 12, fontWeight: '700', marginTop: Spacing.two },

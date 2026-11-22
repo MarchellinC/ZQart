@@ -14,10 +14,11 @@ import { Palette } from '@/constants/colors';
 import { Radius, Spacing } from '@/constants/theme';
 import { productFormSchema } from '@/utils/validation';
 import { uploadProductImage } from '@/services/cloudinary/upload';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 
 export default function AdminScreen() {
   const { role, ready } = useAuth();
-  const { products, refreshProducts } = useDemoStore();
+  const { products, refreshProducts, syncNow } = useDemoStore();
   const [selected, setSelected] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -31,6 +32,8 @@ export default function AdminScreen() {
   const [imageUrl, setImageUrl] = useState('');
   const [selectedImage, setSelectedImage] = useState<ImagePickerAsset | null>(null);
   const [busy, setBusy] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
   useEffect(() => {
     let active = true;
     if (role === 'admin') void (async () => {
@@ -44,7 +47,7 @@ export default function AdminScreen() {
     <Text style={styles.title}>{ready ? 'Akses admin tidak tersedia' : 'Memeriksa akun…'}</Text>
     <Pressable onPress={() => router.replace('/')}><Text style={styles.link}>Kembali ke katalog</Text></Pressable>
   </View>;
-  const reset = () => { setSelected(null); setName(''); setDescription(''); setCategory(''); setCategoryOpen(false); setPrice(''); setPriceFocused(false); setStock(''); setImageUrl(''); setSelectedImage(null); };
+  const reset = () => { setSelected(null); setName(''); setDescription(''); setCategory(''); setCategoryOpen(false); setPrice(''); setPriceFocused(false); setStock(''); setImageUrl(''); setSelectedImage(null); setErrors({}); };
   async function pickImage() {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [4, 3], quality: 0.85 });
@@ -54,7 +57,11 @@ export default function AdminScreen() {
   async function save() {
     const amount = parsePrice(price);
     const parsed = productFormSchema.safeParse({ name, description, category, price: Number.isFinite(amount) ? String(amount) : '', stock, imageUrl });
-    if (!parsed.success) { Alert.alert('Data belum valid', parsed.error.issues[0]?.message ?? 'Periksa kembali data produk.'); return; }
+    if (!parsed.success) {
+      setErrors(Object.fromEntries(parsed.error.issues.map((issue) => [String(issue.path[0]), issue.message])));
+      return;
+    }
+    setErrors({});
     const count = Number(stock);
     setBusy(true);
     try {
@@ -64,6 +71,13 @@ export default function AdminScreen() {
       if (!selectedCategory) throw new Error('Kategori ini sudah tidak tersedia. Muat ulang halaman lalu pilih kategori yang ada.');
       setCategories(savedCategories);
       const old = products.find((item) => item.id === selected);
+      const normalizedImageUrl = imageUrl.trim() || old?.image_url || null;
+      if (old && !selectedImage && old.name === name.trim() && (old.description ?? '') === description.trim()
+        && old.category === selectedCategory.name && old.price === amount && (old.stock ?? 0) === count
+        && (old.image_url ?? null) === normalizedImageUrl) {
+        Alert.alert('Tidak ada perubahan', 'Data produk masih sama seperti sebelumnya.');
+        return;
+      }
       const uploadedImageUrl = selectedImage ? await uploadProductImage(selectedImage) : imageUrl.trim();
       const record: ProductRecord = {
         id: selected ?? `product-${Date.now()}`, name: name.trim(), description: description.trim(),
@@ -71,41 +85,46 @@ export default function AdminScreen() {
         updated_at: new Date().toISOString(), sync_status: 'pending',
       };
       await productRepository.save(db, record);
-      await refreshProducts(); reset();
+      await refreshProducts();
+      void syncNow();
+      Alert.alert(old ? 'Produk berhasil diubah' : 'Produk berhasil ditambahkan', old
+        ? 'Perubahan produk sudah disimpan.' : 'Produk baru sudah disimpan.');
+      reset();
     } catch (error) { Alert.alert('Gagal menyimpan produk', error instanceof Error ? error.message : String(error)); }
     finally { setBusy(false); }
   }
   async function remove(id: string) {
-    try { const db = await initializeDatabase(); await productRepository.remove(db, id); await refreshProducts(); }
+    try { const db = await initializeDatabase(); await productRepository.remove(db, id); await refreshProducts(); void syncNow(); }
     catch (error) { Alert.alert('Gagal menghapus', error instanceof Error ? error.message : String(error)); }
   }
-  return <AdminLayout title="Dashboard toko" subtitle="Kelola katalog dan pantau operasional ZQART." active="products">
+  return <AdminLayout title="Dashboard toko" subtitle="Kelola katalog dan pantau operasional ZQART." active="products" scrollToTopToken={selected}>
     <View style={styles.content}>
     <Text style={styles.title}>Kelola produk</Text>
     <Text style={styles.subtitle}>Perubahan disimpan di SQLite perangkat ini.</Text>
     <View style={styles.form}>
       <Text style={styles.formTitle}>{selected ? 'Ubah produk' : 'Tambah produk'}</Text>
-      <Field label="Nama" value={name} onChangeText={setName} />
-      <Field label="Deskripsi" value={description} onChangeText={setDescription} />
+      <Field label="Nama" value={name} error={errors.name} onChangeText={(value) => { setName(value); setErrors((current) => ({ ...current, name: '' })); }} />
+      <Field label="Deskripsi" value={description} error={errors.description} onChangeText={(value) => { setDescription(value); setErrors((current) => ({ ...current, description: '' })); }} />
       <View style={styles.field}>
         <Text style={styles.label}>Kategori</Text>
-        <Pressable style={styles.dropdownButton} onPress={() => setCategoryOpen((open) => !open)}>
+        <Pressable style={[styles.dropdownButton, errors.category && styles.invalid]} onPress={() => setCategoryOpen((open) => !open)}>
           <Text style={[styles.dropdownText, !category && styles.placeholder]}>{category || 'Pilih kategori'}</Text>
           <Text style={styles.dropdownChevron}>{categoryOpen ? '⌃' : '⌄'}</Text>
         </Pressable>
         {categoryOpen ? <View style={styles.dropdownMenu}>
           {categories.length ? categories.map((item) => <Pressable key={item.id} style={styles.dropdownOption}
-            onPress={() => { setCategory(item.name); setCategoryOpen(false); }}>
+            onPress={() => { setCategory(item.name); setCategoryOpen(false); setErrors((current) => ({ ...current, category: '' })); }}>
             <Text style={[styles.dropdownText, category === item.name && styles.optionSelected]}>{item.name}</Text>
           </Pressable>) : <Text style={styles.emptyCategories}>Belum ada kategori.</Text>}
           <Pressable style={styles.manageCategories} onPress={() => router.push('/categories')}>
             <Text style={styles.link}>Kelola kategori</Text>
           </Pressable>
         </View> : null}
+        {errors.category ? <Text style={styles.errorText}>{errors.category}</Text> : null}
       </View>
       <View style={styles.field}>
         <Text style={styles.label}>Harga</Text>
-        <View style={styles.priceInputWrap}>
+        <View style={[styles.priceInputWrap, errors.price && styles.invalid]}>
           <Text style={styles.currency}>Rp</Text>
           <TextInput value={priceFocused ? formatGroupedPrice(price) : formatPrice(price)} selection={priceFocused ? priceSelection : undefined} onFocus={() => {
             const currentPrice = parsePrice(price);
@@ -114,13 +133,14 @@ export default function AdminScreen() {
           }} onBlur={() => setPriceFocused(false)} onChangeText={(value) => {
             const raw = value.replace(/\D/g, '');
             const cursor = formatGroupedPrice(raw).length;
-            setPrice(raw); setPriceSelection({ start: cursor, end: cursor });
+            setPrice(raw); setPriceSelection({ start: cursor, end: cursor }); setErrors((current) => ({ ...current, price: '' }));
           }}
             keyboardType="number-pad" style={styles.priceInput} placeholder="0,00" />
         </View>
+        {errors.price ? <Text style={styles.errorText}>{errors.price}</Text> : null}
         <Text style={styles.hint}>Pemisah ribuan dan ,00 ditampilkan otomatis setelah selesai mengetik.</Text>
       </View>
-      <Field label="Stok" value={stock} onChangeText={setStock} numeric />
+      <Field label="Stok" value={stock} error={errors.stock} onChangeText={(value) => { setStock(value); setErrors((current) => ({ ...current, stock: '' })); }} numeric />
       <View style={styles.field}>
         <Text style={styles.label}>Foto produk</Text>
         {(selectedImage || imageUrl) ? <View style={styles.imagePreview}><Image source={{ uri: selectedImage?.uri ?? imageUrl }} style={styles.image} contentFit="contain" /></View> : <View style={styles.imagePlaceholder}><Text style={styles.hint}>Belum ada foto</Text></View>}
@@ -128,7 +148,8 @@ export default function AdminScreen() {
           <Text style={styles.link}>{selectedImage ? 'Pilih foto lain' : 'Pilih foto dari perangkat'}</Text>
         </Pressable>
         {selectedImage ? <Text style={styles.hint}>{selectedImage.fileName ?? 'Foto dipilih'} · diunggah saat disimpan (maks. 8 MB).</Text> : null}
-        <Field label="Atau tempel URL gambar" value={imageUrl} onChangeText={(value) => { setImageUrl(value); setSelectedImage(null); }} />
+        <Field label="Atau tempel URL gambar" value={imageUrl} error={errors.imageUrl}
+          onChangeText={(value) => { setImageUrl(value); setSelectedImage(null); setErrors((current) => ({ ...current, imageUrl: '' })); }} />
       </View>
       <Pressable style={styles.primary} disabled={busy} onPress={() => { void save(); }}><Text style={styles.primaryText}>{busy ? 'Menyimpan…' : selected ? 'Simpan perubahan' : 'Tambah produk'}</Text></Pressable>
       {selected ? <Pressable onPress={reset}><Text style={styles.link}>Batal mengubah</Text></Pressable> : null}
@@ -140,16 +161,20 @@ export default function AdminScreen() {
         setCategory(item.category); setPrice(String(item.price)); setPriceFocused(false); setCategoryOpen(false); setStock(String(item.stock ?? 0));
         setImageUrl(item.image_url ?? ''); setSelectedImage(null);
       }}><Text style={styles.link}>Ubah</Text></Pressable>
-      <Pressable onPress={() => Alert.alert('Hapus produk?', item.name, [{ text: 'Batal' }, { text: 'Hapus', style: 'destructive', onPress: () => { void remove(item.id); } }])}><Text style={styles.delete}>Hapus</Text></Pressable>
+      <Pressable onPress={() => setPendingDelete({ id: item.id, name: item.name })}><Text style={styles.delete}>Hapus</Text></Pressable>
     </View>)}
+    <ConfirmDialog visible={pendingDelete !== null} title="Hapus produk?"
+      message={pendingDelete ? `${pendingDelete.name} akan dihapus dari katalog. Tindakan ini tidak dapat dibatalkan.` : ''}
+      confirmLabel="Ya, hapus produk" onCancel={() => setPendingDelete(null)}
+      onConfirm={() => { const item = pendingDelete; setPendingDelete(null); if (item) void remove(item.id); }} />
     </View>
   </AdminLayout>;
 }
 
-function Field(props: { label: string; value: string; onChangeText: (value: string) => void; numeric?: boolean }) {
+function Field(props: { label: string; value: string; onChangeText: (value: string) => void; numeric?: boolean; error?: string }) {
   return <View style={styles.field}><Text style={styles.label}>{props.label}</Text><TextInput
     value={props.value} onChangeText={props.onChangeText} keyboardType={props.numeric ? 'decimal-pad' : 'default'}
-    style={styles.input} /></View>;
+    style={[styles.input, props.error && styles.invalid]} />{props.error ? <Text style={styles.errorText}>{props.error}</Text> : null}</View>;
 }
 
 function parsePrice(value: string) {
@@ -177,6 +202,8 @@ const styles = StyleSheet.create({
   formTitle: { fontSize: 16, fontWeight: '800', color: Palette.text },
   field: { gap: 5 }, label: { fontSize: 12, fontWeight: '700', color: Palette.text },
   input: { minHeight: 42, borderRadius: 12, borderWidth: 1, borderColor: Palette.border, paddingHorizontal: 12, color: Palette.text },
+  invalid: { borderColor: Palette.error, borderWidth: 1.5 },
+  errorText: { color: Palette.error, fontSize: 11, lineHeight: 16 },
   dropdownButton: { minHeight: 44, borderRadius: 12, borderWidth: 1, borderColor: Palette.border, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: Palette.white },
   dropdownText: { color: Palette.text, fontSize: 14 },
   placeholder: { color: Palette.secondaryText },

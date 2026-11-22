@@ -8,6 +8,7 @@ import { Palette } from '@/constants/colors';
 import { Radius, Spacing } from '@/constants/theme';
 import { addressFieldsSchema } from '@/utils/validation';
 import { useDemoStore } from '@/contexts/demo-store';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 
 type Fields = Omit<AddressRecord, 'id' | 'user_id' | 'is_default' | 'updated_at'>;
 const empty: Fields = { recipient_name: '', phone_number: '', province: '', city: '', district: '', postal_code: '', full_address: '' };
@@ -23,6 +24,8 @@ export default function AddressesScreen() {
   const [form, setForm] = useState<Fields>(empty);
   const [selected, setSelected] = useState<string | null>(null);
   const [isDefault, setIsDefault] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [pendingDelete, setPendingDelete] = useState<AddressRecord | null>(null);
   const uid = user?.uid;
   const reload = useCallback(async () => {
     if (!uid) return;
@@ -40,16 +43,32 @@ export default function AddressesScreen() {
   }, [uid]);
   if (!user || role !== 'buyer') return <View style={styles.center}><Text style={styles.title}>Masuk sebagai buyer untuk mengelola alamat.</Text><Pressable onPress={() => router.replace('/login')}><Text style={styles.link}>Masuk</Text></Pressable></View>;
   const buyerUid = user.uid;
-  const update = (key: keyof Fields, value: string) => setForm((current) => ({ ...current, [key]: value }));
-  const reset = () => { setForm(empty); setSelected(null); setIsDefault(false); };
+  const update = (key: keyof Fields, value: string) => {
+    setForm((current) => ({ ...current, [key]: value }));
+    setErrors((current) => ({ ...current, [key]: '' }));
+  };
+  const reset = () => { setForm(empty); setSelected(null); setIsDefault(false); setErrors({}); };
   async function save() {
     const validation = addressFieldsSchema.safeParse(form);
-    if (!validation.success) { Alert.alert('Form belum lengkap', validation.error.issues[0]?.message ?? 'Periksa kembali alamat.'); return; }
+    if (!validation.success) {
+      setErrors(Object.fromEntries(validation.error.issues.map((issue) => [String(issue.path[0]), issue.message])));
+      return;
+    }
+    setErrors({});
+    const old = items.find((item) => item.id === selected);
+    if (old && labels.every(([key]) => old[key].trim() === validation.data[key].trim())
+      && Boolean(old.is_default) === (isDefault || items.length === 0)) {
+      Alert.alert('Tidak ada perubahan', 'Data alamat masih sama seperti sebelumnya.');
+      return;
+    }
     try {
       const db = await initializeDatabase();
       await addressRepository.save(db, { ...validation.data, id: selected ?? `address-${Date.now()}`,
         user_id: buyerUid, is_default: isDefault || items.length === 0 ? 1 : 0, updated_at: new Date().toISOString() });
-      await reload(); reset(); void syncNow();
+      await reload();
+      Alert.alert(old ? 'Alamat berhasil diubah' : 'Alamat berhasil ditambahkan', old
+        ? 'Perubahan alamat sudah disimpan.' : 'Alamat baru sudah disimpan.');
+      reset(); void syncNow();
     } catch (error) { Alert.alert('Alamat gagal disimpan', error instanceof Error ? error.message : String(error)); }
   }
   async function remove(id: string) {
@@ -60,7 +79,8 @@ export default function AddressesScreen() {
     <View style={styles.form}>
       <Text style={styles.heading}>{selected ? 'Ubah alamat' : 'Tambah alamat'}</Text>
       {labels.map(([key, label]) => <View key={key} style={styles.field}><Text style={styles.label}>{label}</Text><TextInput
-        value={form[key]} onChangeText={(value) => update(key, value)} style={styles.input} multiline={key === 'full_address'} /></View>)}
+        value={form[key]} onChangeText={(value) => update(key, value)} style={[styles.input, errors[key] && styles.invalid]} multiline={key === 'full_address'} />
+        {errors[key] ? <Text style={styles.errorText}>{errors[key]}</Text> : null}</View>)}
       <Pressable style={styles.defaultButton} onPress={() => setIsDefault((value) => !value)}><Text style={styles.link}>{isDefault ? '★ Alamat utama' : 'Jadikan alamat utama'}</Text></Pressable>
       <Pressable style={styles.primary} onPress={() => { void save(); }}><Text style={styles.primaryText}>Simpan alamat</Text></Pressable>
       {selected ? <Pressable onPress={reset}><Text style={styles.link}>Batal mengubah</Text></Pressable> : null}
@@ -71,10 +91,14 @@ export default function AddressesScreen() {
       <View style={styles.actions}>
         <Pressable onPress={() => { setSelected(item.id); setForm({ ...item }); setIsDefault(Boolean(item.is_default)); }}><Text style={styles.link}>Ubah</Text></Pressable>
         {!item.is_default ? <Pressable onPress={() => { void (async () => { const db = await initializeDatabase(); await addressRepository.setDefault(db, buyerUid, item.id); await reload(); void syncNow(); })().catch((error) => Alert.alert('Gagal mengubah alamat utama', String(error))); }}><Text style={styles.link}>Jadikan utama</Text></Pressable> : null}
-        <Pressable onPress={() => Alert.alert('Hapus alamat?', item.recipient_name, [{ text: 'Batal' }, { text: 'Hapus', style: 'destructive', onPress: () => { void remove(item.id).catch((error) => Alert.alert('Gagal', String(error))); } }])}><Text style={styles.delete}>Hapus</Text></Pressable>
+        <Pressable onPress={() => setPendingDelete(item)}><Text style={styles.delete}>Hapus</Text></Pressable>
       </View>
     </View>)}
     <Pressable onPress={() => router.back()}><Text style={styles.link}>Kembali</Text></Pressable>
+    <ConfirmDialog visible={pendingDelete !== null} title="Hapus alamat?"
+      message={pendingDelete ? `Alamat ${pendingDelete.recipient_name} akan dihapus dari akunmu.` : ''}
+      confirmLabel="Ya, hapus alamat" onCancel={() => setPendingDelete(null)}
+      onConfirm={() => { const item = pendingDelete; setPendingDelete(null); if (item) void remove(item.id).catch((error) => Alert.alert('Gagal menghapus alamat', String(error))); }} />
   </ScrollView>;
 }
 
@@ -86,6 +110,7 @@ const styles = StyleSheet.create({
   heading: { color: Palette.text, fontSize: 15, fontWeight: '800' }, field: { gap: 4 },
   label: { color: Palette.secondaryText, fontSize: 11, fontWeight: '700' },
   input: { minHeight: 42, borderWidth: 1, borderColor: Palette.border, borderRadius: 12, paddingHorizontal: 10, color: Palette.text },
+  invalid: { borderColor: Palette.error, borderWidth: 1.5 }, errorText: { color: Palette.error, fontSize: 11 },
   defaultButton: { alignSelf: 'flex-start', padding: Spacing.one },
   primary: { minHeight: 46, borderRadius: Radius.pill, backgroundColor: Palette.primaryDark, alignItems: 'center', justifyContent: 'center' },
   primaryText: { color: Palette.white, fontWeight: '700' },
