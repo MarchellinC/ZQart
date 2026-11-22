@@ -1,6 +1,8 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { onAuthStateChanged, type User } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
 import { firebaseAuth } from '@/services/firebase/auth';
+import { firestore } from '@/services/firebase/firestore';
 import { initializeDatabase, userRepository } from '@/database';
 import { LOCAL_ADMIN_UIDS } from '@/services/firebase/admin-accounts';
 
@@ -15,11 +17,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const db = await initializeDatabase();
         const previous = await userRepository.findById(db, user.uid);
-        const role = LOCAL_ADMIN_UIDS.has(user.uid) ? 'admin' : 'buyer';
+        let cloudRole: string | null = null;
+        let cloudRoleLookupSucceeded = false;
+        try {
+          const profile = await getDoc(doc(firestore, 'users', user.uid));
+          cloudRoleLookupSucceeded = true;
+          cloudRole = profile.exists() ? String(profile.data().role ?? '') : null;
+        } catch (error) {
+          console.warn('Cloud role lookup failed; using the last local role.', error);
+        }
+        const role = cloudRoleLookupSucceeded
+          ? cloudRole === 'admin' || LOCAL_ADMIN_UIDS.has(user.uid) ? 'admin' : 'buyer'
+          : LOCAL_ADMIN_UIDS.has(user.uid) ? 'admin' : previous?.role ?? 'buyer';
+        const name = user.displayName ?? user.email?.split('@')[0] ?? 'Buyer';
+        const email = user.email ?? '';
+        const changed = !previous || previous.name !== name || previous.email !== email || previous.role !== role;
         await userRepository.save(db, {
-          id: user.uid, name: user.displayName ?? user.email?.split('@')[0] ?? 'Buyer',
-          email: user.email ?? '', role, created_at: previous?.created_at ?? new Date().toISOString(),
-          sync_status: 'pending',
+          id: user.uid, name, email, role, created_at: previous?.created_at ?? new Date().toISOString(),
+          updated_at: changed ? new Date().toISOString() : previous.updated_at,
+          sync_status: changed ? 'pending' : previous.sync_status,
         });
         setState({ user, role, ready: true });
       } catch (error) {

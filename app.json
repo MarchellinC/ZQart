@@ -33,6 +33,14 @@
           "imageWidth": 90
         }
       ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Izinkan ZQART memilih foto produk dari perangkat.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ],
       "expo-sqlite",
       "expo-secure-store"
     ],

@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   Auth, createUserWithEmailAndPassword, getAuth, initializeAuth,
-  signInWithEmailAndPassword, signOut, updateProfile,
+  signInWithEmailAndPassword, signOut, updateProfile, type User,
 } from 'firebase/auth';
 // Firebase 13.3.0 exposes this through its React Native entry, but omits it from shared declarations.
 // @ts-expect-error The React Native runtime entry for firebase/auth exports this API.
@@ -39,6 +39,13 @@ export async function register(email: string, password: string, displayName: str
 
 export function logOut() {
   return signOut(firebaseAuth);
+}
+
+export async function updateDisplayName(name: string): Promise<User> {
+  const user = firebaseAuth.currentUser;
+  if (!user) throw new Error('Silakan masuk kembali untuk mengubah profil.');
+  await updateProfile(user, { displayName: name.trim() });
+  return user;
 }
 
 export function getAuthErrorMessage(error: unknown): string {
