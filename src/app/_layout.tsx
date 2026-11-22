@@ -32,8 +32,11 @@ export default function TabLayout() {
             <Stack.Screen name="login" />
             <Stack.Screen name="register" />
             <Stack.Screen name="admin" />
+            <Stack.Screen name="admin-orders" />
+            <Stack.Screen name="admin-users" />
             <Stack.Screen name="addresses" />
             <Stack.Screen name="checkout" />
+            <Stack.Screen name="orders" />
             <Stack.Screen name="info" />
             <Stack.Screen name="store-address" />
             <Stack.Screen name="categories" />

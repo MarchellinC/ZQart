@@ -32,6 +32,17 @@ const migrations = [
       `CREATE TABLE AppliedSyncDeletions (id TEXT PRIMARY KEY NOT NULL, applied_at TEXT NOT NULL)`,
     ],
   },
+  {
+    version: 4,
+    statements: [
+      `CREATE TABLE Orders (
+        id TEXT PRIMARY KEY NOT NULL, user_id TEXT NOT NULL, items_json TEXT NOT NULL,
+        total REAL NOT NULL, address_json TEXT NOT NULL, created_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'baru', sync_status TEXT NOT NULL DEFAULT 'synced'
+      )`,
+      'CREATE INDEX idx_orders_user ON Orders(user_id,created_at)',
+    ],
+  },
 ];
 
 export async function migrateDatabase(db: SQLiteDatabase): Promise<void> {

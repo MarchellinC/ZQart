@@ -8,16 +8,16 @@ import { BottomNavigation } from './bottom-navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { Palette } from '@/constants/colors';
 
-type Tab = 'home' | 'favorites' | 'cart' | 'profile';
+type Tab = 'home' | 'favorites' | 'cart' | 'orders' | 'profile';
 type Props = { active: Tab; children: ReactNode };
 
 export function BuyerPage({ active, children }: Props) {
-  const { role, ready } = useAuth();
+  const { role, ready, user } = useAuth();
   useEffect(() => {
-    if (ready && role === 'admin') router.replace('/admin');
-  }, [ready, role]);
+    if (ready && user && role === 'admin') router.replace('/admin');
+  }, [ready, role, user]);
 
-  if (!ready || role === 'admin') return <GradientBackground style={styles.guard}>
+  if (!ready || (user && role === 'admin')) return <GradientBackground style={styles.guard}>
     <SafeAreaView style={styles.guardContent}>
       <View><Text style={styles.guardTitle}>{role === 'admin' ? 'Membuka dashboard admin' : 'Memeriksa sesi'}</Text></View>
     </SafeAreaView>

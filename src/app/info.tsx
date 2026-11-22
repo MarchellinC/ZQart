@@ -25,7 +25,7 @@ export default function InfoScreen() {
         {address ? <Text style={styles.body}>{address.recipient_name} · {address.phone_number}{'\n'}{address.full_address}, {address.district}, {address.city}, {address.province} {address.postal_code}</Text>
           : <Text style={styles.body}>Alamat toko belum tersedia. Informasi ini akan muncul setelah admin mengaturnya.</Text>}
       </View>
-      <Text style={styles.notice}>Checkout di ZQART hanya simulasi dan tidak memproses pembayaran atau pesanan nyata.</Text>
+      <Text style={styles.notice}>Checkout membuat pesanan dan memperbarui stok. Pembayaran diproses di luar aplikasi.</Text>
     </ScrollView>
   </BuyerPage>;
 }

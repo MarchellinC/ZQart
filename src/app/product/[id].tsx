@@ -11,13 +11,20 @@ import { useDemoStore } from '@/contexts/demo-store';
 import { useAuth } from '@/contexts/auth-context';
 import { formatRupiah } from '@/utils/currency';
 import { GradientBackground } from '@/components/gradient-background';
+import { QuantitySelector } from '@/components/quantity-selector';
 
 export default function ProductDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { role } = useAuth();
-  const { addToCart, products } = useDemoStore();
+  const { addToCart, setQuantity, removeFromCart, products, cartItems } = useDemoStore();
   const product = products.find((item) => item.id === id);
   if (!product) return <ThemedText>Produk tidak ditemukan.</ThemedText>;
+  const selectedProduct = product;
+  const cartQuantity = cartItems.find((item) => item.productId === selectedProduct.id)?.quantity ?? 0;
+  async function checkoutProduct() {
+    if (cartQuantity === 0) await addToCart(selectedProduct.id);
+    router.push({ pathname: '/checkout', params: { items: selectedProduct.id } });
+  }
 
   return (
     <GradientBackground style={styles.background}>
@@ -39,12 +46,20 @@ export default function ProductDetailScreen() {
           <ThemedText themeColor="textSecondary" style={styles.stock}>
             {product.stock ? `Stok tersedia: ${product.stock}` : 'Stok habis'}
           </ThemedText>
+          {cartQuantity > 0 ? <View style={styles.cartControls}>
+            <ThemedText style={styles.inCart}>Jumlah di keranjang</ThemedText>
+            <QuantitySelector value={cartQuantity} min={0} max={Math.max(selectedProduct.stock ?? 0, cartQuantity)} onChange={(quantity) => {
+              if (quantity < 1) void removeFromCart(selectedProduct.id); else void setQuantity(selectedProduct.id, quantity);
+            }} />
+          </View> : null}
           <ThemedText themeColor="textSecondary" style={styles.description}>
             {product.description ?? 'Dibuat dengan perhatian pada detail oleh pengrajin lokal.'}
           </ThemedText>
           <View style={styles.note}><ThemedText style={styles.noteText}>♡  Mendukung karya kreatif Indonesia</ThemedText></View>
           {role !== 'admin' ? <PrimaryButton title={product.stock ? 'Tambah ke keranjang' : 'Stok habis'}
             disabled={!product.stock} onPress={() => addToCart(product.id)} /> : null}
+          {role !== 'admin' ? <SecondaryButton title="Checkout produk ini" disabled={!product.stock}
+            onPress={() => { void checkoutProduct(); }} /> : null}
           <SecondaryButton title="Lanjut melihat produk" onPress={() => router.replace('/')} />
         </View>
       </ScrollView>
@@ -68,6 +83,8 @@ const styles = StyleSheet.create({
   rating: { color: Palette.secondaryText, fontSize: 12 },
   price: { marginTop: Spacing.one, color: Palette.primaryDark, fontSize: 21, fontWeight: '800' },
   stock: { fontSize: 12, fontWeight: '700' },
+  inCart: { color: Palette.primaryDark, fontSize: 13, fontWeight: '800' },
+  cartControls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   description: { fontSize: 13, lineHeight: 20, marginVertical: Spacing.two },
   note: { marginBottom: Spacing.two, padding: Spacing.two, borderRadius: Radius.small, backgroundColor: Palette.primarySoft },
   noteText: { color: Palette.primaryDark, fontSize: 12, fontWeight: '600' },
