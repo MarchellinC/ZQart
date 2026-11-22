@@ -290,8 +290,8 @@ async function pullRemoteData(db: SQLiteDatabase, actor: SyncActor): Promise<num
     const categoryId = typeof data.category_id === 'string' ? remoteCategoryIds.get(data.category_id) ?? data.category_id : data.category_id;
     const remote = { ...data, category_id: categoryId, id: snapshot.id } as ProductRecord;
     if (await isDirty(db, 'Products', remote.id)) continue;
-    const local = await productRepository.findById(db, remote.id);
-    if (local && local.updated_at > remote.updated_at && !isUnmodifiedDemoSeed(local as unknown as Record<string, unknown>)) continue;
+    // Firestore is the source of truth for synced products. Comparing device
+    // timestamps can leave checkout stock stale when device clocks differ.
     await productRepository.save(db, { ...remote, sync_status: 'synced' });
     downloaded++;
   }
@@ -342,6 +342,47 @@ async function pullRemoteData(db: SQLiteDatabase, actor: SyncActor): Promise<num
   return downloaded;
 }
 
+async function uploadMissingAdminProducts(db: SQLiteDatabase): Promise<{ uploaded: number; failed: number }> {
+  const localProducts = await productRepository.list(db);
+  let uploaded = 0;
+  let failed = 0;
+  for (const product of localProducts) {
+    const productRef = doc(firestore, 'products', product.id);
+    try {
+      const remote = await getDoc(productRef);
+      if (remote.exists() && product.sync_status !== 'synced') continue;
+      const remoteData = remote.data() ?? {};
+      const localStock = Number.isInteger(product.stock) && product.stock >= 0 ? product.stock : 0;
+      const remoteStock = Number.isInteger(remoteData.stock) && remoteData.stock >= 0
+        ? remoteData.stock as number : localStock;
+      const payload = {
+        ...product,
+        ...remoteData,
+        id: product.id,
+        name: typeof remoteData.name === 'string' ? remoteData.name : product.name,
+        description: typeof remoteData.description === 'string' ? remoteData.description : product.description,
+        price: typeof remoteData.price === 'number' ? remoteData.price : product.price,
+        image_url: typeof remoteData.image_url === 'string' || remoteData.image_url === null
+          ? remoteData.image_url : product.image_url,
+        category_id: typeof remoteData.category_id === 'string' || remoteData.category_id === null
+          ? remoteData.category_id : product.category_id,
+        stock: remoteStock,
+        updated_at: typeof remoteData.updated_at === 'string' ? remoteData.updated_at : product.updated_at,
+      } as Record<string, unknown>;
+      delete payload.sync_status;
+      await setDoc(productRef, payload, { merge: true });
+      await markSyncStatus(db, 'products', product.id, '', 'synced');
+      await removeSyncOperation(db, `products:public:${product.id}`);
+      if (!remote.exists()) uploaded++;
+    } catch (error) {
+      failed++;
+      await markSyncStatus(db, 'products', product.id, '', 'failed');
+      console.warn(`Missing product upload failed for products/${product.id}`, error);
+    }
+  }
+  return { uploaded, failed };
+}
+
 export async function synchronize(
   db: SQLiteDatabase, actor: SyncActor,
 ): Promise<SyncSummary> {
@@ -363,6 +404,11 @@ export async function synchronize(
       await markSyncStatus(db, item.collection, item.document_id, item.owner_uid, 'failed');
       console.warn(`Sync failed for ${item.collection}/${item.document_id}`, error);
     }
+  }
+  if (isAdmin(actor)) {
+    const missingProducts = await uploadMissingAdminProducts(db);
+    uploaded += missingProducts.uploaded;
+    failed += missingProducts.failed;
   }
   try {
     downloaded += await pullRemoteData(db, actor);
