@@ -10,15 +10,17 @@ function categoryId(name: string) {
 export async function ensureCatalogSeed(db: SQLiteDatabase): Promise<void> {
   const now = new Date().toISOString();
   const categories = [...new Set(demoProducts.map((item) => item.category))];
+  const categoryIds = new Map<string, string>();
   for (const name of categories) {
-    await categoryRepository.save(db, { id: categoryId(name), name, updated_at: now, sync_status: 'pending' });
+    const id = await categoryRepository.save(db, { id: categoryId(name), name, updated_at: now, sync_status: 'pending' });
+    categoryIds.set(name, id);
   }
   const existing = await productRepository.list(db);
   for (const item of demoProducts) {
     if (existing.some((product) => product.id === item.id)) continue;
     await productRepository.save(db, {
       id: item.id, name: item.name, description: `${item.name}, karya lokal pilihan.`,
-      price: item.price, image_url: null, category_id: categoryId(item.category),
+      price: item.price, image_url: null, category_id: categoryIds.get(item.category) ?? categoryId(item.category),
       stock: 10, updated_at: now, sync_status: 'pending',
     });
   }

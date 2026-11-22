@@ -1,4 +1,5 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
+import { queueSyncOperation } from '../sync-queue';
 
 export interface ProductRecord {
   id: string; name: string; description: string; price: number; image_url: string | null;
@@ -35,6 +36,11 @@ export const productRepository = {
     );
   },
   async remove(db: SQLiteDatabase, id: string): Promise<void> {
-    await db.runAsync('DELETE FROM Products WHERE id=?', id);
+    await db.withTransactionAsync(async () => {
+      await queueSyncOperation(db, {
+        collection: 'products', document_id: id, owner_uid: '', operation: 'delete', payload: null,
+      });
+      await db.runAsync('DELETE FROM Products WHERE id=?', id);
+    });
   },
 };

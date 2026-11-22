@@ -2,11 +2,13 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { Alert, AppState } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { router } from 'expo-router';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { initializeDatabase, buyerDataRepository } from '@/database';
 import { ensureCatalogSeed, loadCatalog } from '@/database/catalog';
 import { getPendingSyncCount } from '@/database/sync-queue';
 import { refreshPublicCatalog } from '@/services/api/catalog';
 import { synchronize } from '../services/firebase/sync';
+import { firestore } from '@/services/firebase/firestore';
 import { useAuth } from './auth-context';
 import type { Product } from '@/types/product';
 
@@ -17,9 +19,9 @@ export type SyncInfo = {
 };
 type DemoStoreValue = {
   products: Product[]; favoriteIds: string[]; cartItems: DemoCartItem[];
-  refreshProducts: () => Promise<void>; toggleFavorite: (id: string) => void;
-  addToCart: (id: string) => void; setQuantity: (id: string, quantity: number) => void;
-  removeFromCart: (id: string) => void; syncInfo: SyncInfo; syncNow: () => Promise<void>;
+  refreshProducts: () => Promise<void>; refreshBuyerData: () => Promise<void>; toggleFavorite: (id: string) => void;
+  addToCart: (id: string) => Promise<void>; setQuantity: (id: string, quantity: number) => Promise<void>;
+  removeFromCart: (id: string) => Promise<void>; syncInfo: SyncInfo; syncNow: () => Promise<void>;
 };
 const DemoStore = createContext<DemoStoreValue | null>(null);
 
@@ -89,7 +91,7 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       // Applying remote deletion tombstones can update local data after the first buyer read.
       await loadBuyerData();
       setProducts(catalog);
-      const syncError = [summary.failed ? `${summary.failed} perubahan gagal disinkronkan.` : null, apiError]
+      const syncError = [summary.pullError, summary.failed && !summary.pullError ? `${summary.failed} perubahan gagal disinkronkan.` : null, apiError]
         .filter(Boolean).join(' ') || null;
       if (!summary.failed) lastSyncedAt.current = new Date().toISOString();
       setSyncInfo({ state: syncError ? 'error' : 'synced', pending, lastSyncedAt: lastSyncedAt.current, error: syncError });
@@ -106,6 +108,17 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
   }, [loadBuyerData, role, uid]);
 
   useEffect(() => { syncNowRef.current = syncNow; }, [syncNow]);
+
+  useEffect(() => {
+    const collections = ['products', 'categories', 'storeAddress'];
+    const unsubscribe = collections.map((name) => onSnapshot(collection(firestore, name), () => {
+      void syncNowRef.current();
+    }, (error) => {
+      const code = 'code' in error ? String(error.code) : 'unknown';
+      setSyncInfo((current) => ({ ...current, state: 'error', error: `Firestore listener ${name}: ${code} — ${error.message}` }));
+    }));
+    return () => unsubscribe.forEach((stop) => stop());
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -137,54 +150,58 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
   }, [syncNow]);
 
   const value = useMemo<DemoStoreValue>(() => ({
-    products, favoriteIds, cartItems, refreshProducts, syncInfo, syncNow,
+    products, favoriteIds, cartItems, refreshProducts, refreshBuyerData: loadBuyerData, syncInfo, syncNow,
     toggleFavorite: (productId) => {
       if (!isBuyer || !uid) { router.push('/login'); return; }
+      const wasFavorite = favoriteIds.includes(productId);
       void (async () => {
         const db = await initializeDatabase();
-        if (favoriteIds.includes(productId)) await buyerDataRepository.removeFavorite(db, uid, productId);
+        if (wasFavorite) await buyerDataRepository.removeFavorite(db, uid, productId);
         else await buyerDataRepository.addFavorite(db, `${uid}_${productId}`, uid, productId, new Date().toISOString());
         await loadBuyerData();
+        Alert.alert(wasFavorite ? 'Favorit dihapus' : 'Favorit disimpan', wasFavorite
+          ? 'Produk dihapus dari daftar favorit.' : 'Produk ditambahkan ke daftar favorit.');
         const pending = await getPendingSyncCount(db);
         setSyncInfo((current) => ({ ...current, pending }));
         void syncNow();
       })().catch((error: unknown) => Alert.alert('Favorit gagal', error instanceof Error ? error.message : String(error)));
     },
-    addToCart: (productId) => {
+    addToCart: async (productId) => {
       if (!isBuyer || !uid) { router.push('/login'); return; }
-      void (async () => {
+      try {
         const current = cartItems.find((item) => item.productId === productId)?.quantity ?? 0;
         const product = products.find((item) => item.id === productId);
         if (!product || current >= (product.stock ?? 0)) { Alert.alert('Stok habis', 'Jumlah melebihi stok yang tersedia.'); return; }
         const db = await initializeDatabase();
         await buyerDataRepository.setCartQuantity(db, `${uid}_${productId}`, uid, productId, current + 1, new Date().toISOString());
         await loadBuyerData();
+        Alert.alert('Berhasil ditambahkan', 'Produk sudah masuk ke keranjang.');
         const pending = await getPendingSyncCount(db);
         setSyncInfo((info) => ({ ...info, pending }));
         void syncNow();
-      })().catch((error: unknown) => Alert.alert('Keranjang gagal', error instanceof Error ? error.message : String(error)));
+      } catch (error) { Alert.alert('Keranjang gagal', error instanceof Error ? error.message : String(error)); }
     },
-    setQuantity: (productId, quantity) => {
+    setQuantity: async (productId, quantity) => {
       if (!isBuyer || !uid) return;
-      void (async () => {
+      try {
         const db = await initializeDatabase();
         await buyerDataRepository.setCartQuantity(db, `${uid}_${productId}`, uid, productId, quantity, new Date().toISOString());
         await loadBuyerData();
         const pending = await getPendingSyncCount(db);
         setSyncInfo((info) => ({ ...info, pending }));
         void syncNow();
-      })().catch((error: unknown) => Alert.alert('Stok tidak cukup', error instanceof Error ? error.message : String(error)));
+      } catch (error) { Alert.alert('Stok tidak cukup', error instanceof Error ? error.message : String(error)); }
     },
-    removeFromCart: (productId) => {
+    removeFromCart: async (productId) => {
       if (!isBuyer || !uid) return;
-      void (async () => {
+      try {
         const db = await initializeDatabase();
         await buyerDataRepository.removeCartItem(db, uid, productId);
         await loadBuyerData();
         const pending = await getPendingSyncCount(db);
         setSyncInfo((info) => ({ ...info, pending }));
         void syncNow();
-      })().catch((error: unknown) => Alert.alert('Gagal menghapus', error instanceof Error ? error.message : String(error)));
+      } catch (error) { Alert.alert('Gagal menghapus', error instanceof Error ? error.message : String(error)); }
     },
   }), [cartItems, favoriteIds, isBuyer, loadBuyerData, products, refreshProducts, syncInfo, syncNow, uid]);
   return <DemoStore.Provider value={value}>{children}</DemoStore.Provider>;
