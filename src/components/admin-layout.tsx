@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState, type ComponentRef, type ReactNode } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, type Href } from 'expo-router';
 import { Image } from 'expo-image';
 import { SymbolView, type AndroidSymbol, type SFSymbol } from 'expo-symbols';
@@ -8,33 +8,51 @@ import { Palette } from '@/constants/colors';
 import { Radius, Spacing } from '@/constants/theme';
 import { logOut } from '@/services/firebase/auth';
 
-type AdminSection = 'products' | 'categories' | 'store' | 'sync';
+type AdminSection = 'products' | 'orders' | 'users' | 'categories' | 'store' | 'sync';
 type AdminRoute = { id: AdminSection; label: string; href: Href; ios: SFSymbol; native: AndroidSymbol };
 const routes: AdminRoute[] = [
   { id: 'products', label: 'Produk', href: '/admin' as Href, ios: 'shippingbox.fill', native: 'inventory_2' },
+  { id: 'orders', label: 'Pesanan', href: '/admin-orders' as Href, ios: 'list.bullet.rectangle', native: 'receipt_long' },
+  { id: 'users', label: 'Pengguna', href: '/admin-users' as Href, ios: 'person.2', native: 'manage_accounts' },
   { id: 'categories', label: 'Kategori', href: '/categories' as Href, ios: 'square.grid.2x2.fill', native: 'category' },
   { id: 'store', label: 'Alamat toko', href: '/store-address' as Href, ios: 'mappin.and.ellipse', native: 'store' },
   { id: 'sync', label: 'Sinkronisasi', href: '/sync-status' as Href, ios: 'arrow.triangle.2.circlepath', native: 'sync' },
 ];
 
 export function AdminLayout(props: {
-  title: string; subtitle: string; active: AdminSection; children: ReactNode;
+  title: string; subtitle: string; active: AdminSection; children: ReactNode; scrollToTopToken?: string | null;
 }) {
+  const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
+  useEffect(() => {
+    if (props.scrollToTopToken) scrollRef.current?.scrollTo({ y: 0, animated: true });
+  }, [props.scrollToTopToken]);
+  async function handleLogout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await logOut();
+      router.replace({ pathname: '/', params: { loggedOut: '1' } });
+    } catch (error) {
+      Alert.alert('Gagal keluar', error instanceof Error ? error.message : String(error));
+      setLoggingOut(false);
+    }
+  }
   return <SafeAreaView edges={['top', 'bottom']} style={styles.safe}>
     <View style={styles.topbar}>
       <View style={styles.brand}>
         <Image source={require('@/assets/images/zqart-logo.png')} style={styles.logo} contentFit="contain" />
         <View><Text style={styles.brandName}>ZQART</Text><Text style={styles.brandTag}>ADMIN STUDIO</Text></View>
       </View>
-      <Pressable accessibilityRole="button" onPress={() => { void logOut(); router.replace('/'); }} style={styles.logout}>
-        <Text style={styles.logoutText}>Keluar</Text>
+      <Pressable accessibilityRole="button" disabled={loggingOut} onPress={() => { void handleLogout(); }} style={styles.logout}>
+        <Text style={styles.logoutText}>{loggingOut ? 'Keluar…' : 'Keluar'}</Text>
       </Pressable>
     </View>
     <View style={styles.heading}>
       <Text style={styles.title}>{props.title}</Text>
       <Text style={styles.subtitle}>{props.subtitle}</Text>
     </View>
-    <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <ScrollView ref={scrollRef} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       {props.children}
     </ScrollView>
     <View style={styles.bottomBar}>

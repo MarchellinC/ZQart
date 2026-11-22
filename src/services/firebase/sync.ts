@@ -12,12 +12,23 @@ import {
 import type { ProductRecord } from '@/database/repositories/products';
 import type { CategoryRecord } from '@/database/repositories/categories';
 import type { StoreAddressRecord } from '@/database/repositories/store-address';
+import { demoProducts } from '@/constants/demo-products';
 
 type SyncActor = { uid: string | null; role: 'admin' | 'buyer' | null };
 type RemoteDeletion = {
   collection: SyncCollection; document_id: string; owner_uid: string; updated_at: string;
 };
-export type SyncSummary = { uploaded: number; downloaded: number; failed: number };
+export type SyncSummary = { uploaded: number; downloaded: number; failed: number; pullError?: string };
+
+function isUnmodifiedDemoSeed(record: Record<string, unknown>): boolean {
+  const demo = demoProducts.find((item) => item.id === record.id);
+  if (!demo) return false;
+  const seededCategoryId = `category-${demo.category.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+  return record.name === demo.name && record.price === demo.price && record.stock === 10
+    && record.description === `${demo.name}, karya lokal pilihan.`
+    && (record.image_url === null || record.image_url === undefined)
+    && record.category_id === seededCategoryId;
+}
 
 async function queueLegacyPendingChanges(db: SQLiteDatabase): Promise<void> {
   const entities: { table: string; collection: SyncCollection; ownerField?: string }[] = [
@@ -71,6 +82,22 @@ async function pushOperation(db: SQLiteDatabase, item: SyncQueueRecord, actor: S
   if (item.operation === 'upsert') {
     if (!item.payload) throw new Error('Data antrean sinkronisasi kosong.');
     const payload = JSON.parse(item.payload) as Record<string, unknown>;
+    if (item.collection === 'products' && isUnmodifiedDemoSeed(payload)) {
+      const remote = await getDoc(remoteRef);
+      if (remote.exists()) {
+        await markSyncStatus(db, item.collection, item.document_id, item.owner_uid, 'synced');
+        await removeSyncOperation(db, item.id);
+        return;
+      }
+    }
+    if (item.collection === 'categories') {
+      const sameName = await getDocs(query(collection(firestore, 'categories'), where('name', '==', String(payload.name ?? ''))));
+      if (sameName.docs.some((snapshot) => snapshot.id !== item.document_id)) {
+        await markSyncStatus(db, item.collection, item.document_id, item.owner_uid, 'synced');
+        await removeSyncOperation(db, item.id);
+        return;
+      }
+    }
     if (requiresAdmin(item.collection) || item.collection === 'users') {
       const remote = await getDoc(remoteRef);
       const remoteUpdatedAt = remote.exists() ? String(remote.data().updated_at ?? '') : '';
@@ -251,11 +278,20 @@ async function pullRemoteData(db: SQLiteDatabase, actor: SyncActor): Promise<num
     await categoryRepository.save(db, { ...remote, sync_status: 'synced' });
     downloaded++;
   }
+  const categoryIdsByName = new Map((await categoryRepository.list(db))
+    .map((category) => [category.name.trim().toLocaleLowerCase(), category.id]));
+  const remoteCategoryIds = new Map(categories.docs.map((snapshot) => {
+    const remote = snapshot.data();
+    const canonical = categoryIdsByName.get(String(remote.name ?? '').trim().toLocaleLowerCase());
+    return [snapshot.id, canonical ?? snapshot.id];
+  }));
   for (const snapshot of products.docs) {
-    const remote = { ...snapshot.data(), id: snapshot.id } as ProductRecord;
+    const data = snapshot.data();
+    const categoryId = typeof data.category_id === 'string' ? remoteCategoryIds.get(data.category_id) ?? data.category_id : data.category_id;
+    const remote = { ...data, category_id: categoryId, id: snapshot.id } as ProductRecord;
     if (await isDirty(db, 'Products', remote.id)) continue;
     const local = await productRepository.findById(db, remote.id);
-    if (local && local.updated_at > remote.updated_at) continue;
+    if (local && local.updated_at > remote.updated_at && !isUnmodifiedDemoSeed(local as unknown as Record<string, unknown>)) continue;
     await productRepository.save(db, { ...remote, sync_status: 'synced' });
     downloaded++;
   }
@@ -277,7 +313,7 @@ async function pullRemoteData(db: SQLiteDatabase, actor: SyncActor): Promise<num
       if (!local || local.updated_at <= String(remote.updated_at ?? remote.created_at ?? '')) {
         await userRepository.save(db, {
           id: actor.uid, name: String(remote.name ?? ''), email: String(remote.email ?? ''),
-          role: LOCAL_ADMIN_UIDS.has(actor.uid) ? 'admin' : 'buyer',
+          role: LOCAL_ADMIN_UIDS.has(actor.uid) || remote.role === 'admin' ? 'admin' : 'buyer',
           created_at: String(remote.created_at ?? new Date().toISOString()),
           updated_at: String(remote.updated_at ?? remote.created_at ?? new Date().toISOString()),
           sync_status: 'synced',
@@ -312,6 +348,7 @@ export async function synchronize(
   let uploaded = 0;
   let downloaded = 0;
   let failed = 0;
+  let pullError: string | undefined;
   await queueLegacyPendingChanges(db);
   const queue = await listPendingSyncOperations(db, actor.uid ?? '');
   for (const item of queue) {
@@ -332,7 +369,12 @@ export async function synchronize(
     downloaded += await applyDeletions(db, actor);
   } catch (error) {
     failed++;
+    const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : 'unknown';
+    const message = error instanceof Error ? error.message : String(error);
+    pullError = code === 'permission-denied'
+      ? 'Firestore menolak akses saat menarik data. Terbitkan firestore.rules terbaru dan pastikan akun admin memiliki role admin di users.'
+      : `${code}: ${message}`;
     console.warn('Firestore pull failed', error);
   }
-  return { uploaded, downloaded, failed };
+  return { uploaded, downloaded, failed, pullError };
 }

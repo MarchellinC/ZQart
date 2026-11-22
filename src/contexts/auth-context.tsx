@@ -26,9 +26,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch (error) {
           console.warn('Cloud role lookup failed; using the last local role.', error);
         }
-        const role = LOCAL_ADMIN_UIDS.has(user.uid) || cloudRole === 'admin'
-          ? 'admin'
-          : cloudRoleLookupSucceeded ? 'buyer' : previous?.role ?? 'buyer';
+        const role = cloudRoleLookupSucceeded
+          ? cloudRole === 'admin' || LOCAL_ADMIN_UIDS.has(user.uid) ? 'admin' : 'buyer'
+          : LOCAL_ADMIN_UIDS.has(user.uid) ? 'admin' : previous?.role ?? 'buyer';
         const name = user.displayName ?? user.email?.split('@')[0] ?? 'Buyer';
         const email = user.email ?? '';
         const changed = !previous || previous.name !== name || previous.email !== email || previous.role !== role;
